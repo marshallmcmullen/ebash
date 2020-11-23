@@ -1,9 +1,5 @@
 .bash_history
-etest.log*
-etest.html
-etest.json*
-results
-output
+.work
 results
 .forge/work
 .tags

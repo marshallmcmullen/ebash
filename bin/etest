@@ -40,6 +40,7 @@ $(opt_parse \
                                  classify it as a failure if that test fails more than the requested threshold." \
     ":filter  f                | Tests whose name or file match this (bash-style) regular expression will be run." \
     "+html    h=0              | Produce an HTML logfile and strip color codes out of etest.log." \
+    "+logfile=1                | Whether we should use elogfile to log all output." \
     ":log_dir                  | Directory to place logs in.  Defaults to the current directory." \
     "+mount_ns=1               | Run tests inside a mount namespace." \
     ":repeat  r=${REPEAT:-1}   | Number of times to repeat each test." \
@@ -56,6 +57,10 @@ $(opt_parse \
     "+verbose v=${VERBOSE:-0}  | Verbose output." \
     ":work_dir                 | Temporary location where etest can place temporary files.  This location will be both
                                  created and deleted by etest." \
+    "+coverage                 | Run etest through kcov coverage tool to identify and report code coverage for all
+                                 executed code." \
+    ":coverage_dir=coverage    | Directory to store coverage output in." \
+    ":coverage_publish         | Upstream coverage analysis provider to publish results to (e.g. codecov.io)" \
     "@tests                    | Any number of individual tests, which may be executables to be executed and checked for
                                  exit code or may be files whose names end in .etest, in which case they will be sourced
                                  and any test functions found will be executed.  You may also specify directories in
@@ -130,16 +135,57 @@ exec {ETEST_STDERR_FD}<&2
 ETEST_LOG=${log_dir}/etest.log
 ETEST_JSON=${log_dir}/etest.json
 
-elogrotate "${ETEST_JSON}"
-elogfile --rotate_count=10 --tail=${verbose} ${ETEST_LOG}
-
 # Setup redirection for "etest" and actual "test" output
-if [[ ${verbose} -eq 0 ]]; then
+if [[ ${logfile} -eq 0 && ${verbose} -eq 0 ]]; then
+
+    # If we can't use elogfile and we don't want verbose output we are forced to do some trickery to get the desired
+    # result. Yes this is a bit convoluted since we need to basically show the terse output on the console but also
+    # send a copy of both stdout and stderr to the log file. So basically we send stdout to the logfile, then we
+    # create a new file descriptor (3) and associate that with what is our current stderr. Then we can send stderr to
+    # where stdout has been redirect so that they both end up in the logfile.
+    exec 1>${ETEST_LOG}
+    exec 3>&2
+    exec 2>&1
+    exec {ETEST_OUT_FD}<&3
+    ETEST_OUT="$(fd_path)/${ETEST_OUT_FD}"
+elif [[ ${verbose} -eq 0 ]]; then
     ETEST_OUT="$(fd_path)/${ETEST_STDERR_FD}"
-    TEST_OUT="/dev/null"
 else
     ETEST_OUT="/dev/null"
-    TEST_OUT="/dev/stderr"
+fi
+
+# Coverage mode
+if [[ ${coverage} -eq 1 ]]; then
+    command_exists kcov
+
+    efreshdir "${coverage_dir}"
+
+    export COLUMNS
+    kcov --bash-method=DEBUG "${coverage_dir}" \
+        "$0" "${__EBASH_FULL_ARGS[@]}" --no-coverage --no-logfile
+
+    einfo "Coverage data: file://$(readlink -m ${coverage_dir}/index.html)"
+
+    # Optionally publish the coverage data
+    if [[ -n "${coverage_publish}" ]]; then
+
+        einfo "Publishing code coverage to ${coverage_publish}"
+
+        case "${coverage_publish}" in
+            "codecov.io")
+                bash <(curl -s https://codecov.io/bash)
+                ;;
+            *)
+                die "Unsupported $(lval coverage_publish)"
+        esac
+    fi
+
+    exit 0
+fi
+
+if [[ ${logfile} -eq 1 ]]; then
+    elogrotate "${ETEST_JSON}"
+    elogfile --rotate_count=10 --tail=${verbose} ${ETEST_LOG}
 fi
 
 #-------------------------------------------------------------------------------------------------------------------------

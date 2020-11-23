@@ -22,88 +22,31 @@ jobs:
 
   #--------------------------------------------------------------------------------------------------------------------
   #
-  # LINUX
+  # Code Coverage
   #
   #--------------------------------------------------------------------------------------------------------------------
-  Linux:
+  Coverage:
     runs-on: ubuntu-latest
-
-    strategy:
-      fail-fast: false
-      matrix:
-        container:
-          - "alpine:3.12"
-          - "alpine:3.11"
-          - "archlinux"
-          - "centos:8"
-          - "centos:7"
-          - "debian:10"
-          - "debian:9"
-          - "fedora:33"
-          - "fedora:32"
-          - "gentoo/stage3"
-          - "ubuntu:18.04"
-          - "ubuntu:16.04"
-
     container:
-      image: ${{ matrix.container }}
-      options: --init --interactive --privileged --tty
-
-    steps:
-      - uses: actions/checkout@v2
-      - run: echo "OSNAME=$(echo ${{ matrix.container }} | sed -e 's|:|-|' -e 's|/stage3||')" >> ${GITHUB_ENV}
-
-      - name: Install Dependencies
-        run: bin/ebash-install-deps
-
-      - name: Lint
-        run: bin/bashlint
-
-      - name: Self Test
-        run: bin/selftest
-
-      - name: Test
-        run: bin/etest --summary
-
-      - name: Archive test results
-        if: always()
-        uses: actions/upload-artifact@v2
-        with:
-          name: ${{ env.OSNAME }}
-          path: |
-            etest.log
-            etest.json
-
-  #--------------------------------------------------------------------------------------------------------------------
-  #
-  # MacOS
-  #
-  #--------------------------------------------------------------------------------------------------------------------
-  MacOS:
-    strategy:
-      matrix:
-        os: ["11.0", "10.15"]
-    runs-on: macos-${{ matrix.os }}
+      image: gentoo/stage3
+      options: --init --interactive --privileged --tty --security-opt=seccomp=unconfined
     steps:
       - uses: actions/checkout@v2
 
-      - name: Install Dependencies
-        run: bin/ebash-install-deps
+      - name: Dependencies
+        run: bin/ebash-install-deps kcov
 
-      - name: Lint
-        run: bin/bashlint
-
-      - name: Self Test
-        run: bin/selftest
-
+      # Run all tests through kcov coverage analyzer.
       - name: Test
-        run: bin/etest --summary
+        run: bin/etest --coverage --coverage-dir coverage --coverage-publish codecov.io --filter 'array|json|opt'
 
-      - name: Archive test results
+      - name: Archive
         if: always()
         uses: actions/upload-artifact@v2
         with:
-          name: macos-${{ matrix.os }}
+          name: coverage
           path: |
+            coverage
             etest.log
             etest.json
+
